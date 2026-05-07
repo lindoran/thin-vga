@@ -57,7 +57,7 @@ demo: vgaterm_demo
 # ---- cleanup --------------------------------------------------------------
 
 clean:
-	rm -f *.o libvgaterm.a vgaterm_demo editor
+	rm -f *.o libvgaterm.a libvio.a vgaterm_demo editor
 
 distclean: clean
 	rm -f font_vga.h
