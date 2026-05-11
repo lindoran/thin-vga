@@ -76,6 +76,15 @@ struct VGATerm {
 
     int          alive;        /* 0 once window is closed                  */
 
+    /* Four character generator tables, matching real VGA plane-2 behaviour.
+     *
+     * font_table[0] is the default (equivalent to VGA page 0 / BIOS font).
+     * NULL in any slot falls back to the compiled-in vga_font_8x16.
+     * fplane[row*VGA_COLS+col] & 0x03 selects the table for each cell.
+     * All slots zero-initialised by calloc (=> built-in font everywhere). */
+    const unsigned char (*font_table[4])[16];
+    uint8_t              fplane[VGA_ROWS * VGA_COLS];
+
     /* raw pixel buffer (32bpp BGRA or BGRX depending on display) */
     uint32_t    *pixels;       /* VGA_PX_W * VGA_PX_H uint32_t            */
 };
@@ -115,7 +124,8 @@ static void render_cell(VGATerm *vt, int col, int row, int cursor_here)
     unsigned long fg_px = vt->px[fg_idx];
     unsigned long bg_px = vt->px[bg_idx];
 
-    const unsigned char *glyph = vga_font_8x16[ch];
+    const unsigned char (*f)[16] = vt->font_table[vt->fplane[row*VGA_COLS+col] & 0x03];
+    const unsigned char  *glyph  = f ? f[ch] : vga_font_8x16[ch];
 
     int base_x = col * 8;
     int base_y = row * 16;
@@ -374,3 +384,48 @@ void vgaterm_scroll(VGATerm *vt, int n, uint8_t attr)
 /* ---------- X11 accessors ----------------------------------------- */
 Display *vgaterm_display(VGATerm *vt) { return vt->dpy; }
 Window   vgaterm_window (VGATerm *vt) { return vt->win; }
+
+/* -------------------------------------------------------------------------
+ * Character generator table API  (4 slots, matching real VGA plane 2)
+ * ------------------------------------------------------------------------- */
+
+/* Set one of the four font slots (slot 0-3).
+ * NULL restores the slot to the compiled-in vga_font_8x16 fallback.
+ * The pointer is stored, not copied; modifications to the pointed-at
+ * array are reflected on the very next vgaterm_blit() call.            */
+void vgaterm_set_font_slot(VGATerm *vt, int slot,
+                            const unsigned char (*font)[16])
+{
+    if (vt && slot >= 0 && slot <= 3)
+        vt->font_table[slot] = font;
+}
+
+/* Backward-compatible helpers */
+void vgaterm_set_font  (VGATerm *vt, const unsigned char (*font)[16])
+{ vgaterm_set_font_slot(vt, 0, font); }
+void vgaterm_set_font_a(VGATerm *vt, const unsigned char (*font)[16])
+{ vgaterm_set_font_slot(vt, 0, font); }
+void vgaterm_set_font_b(VGATerm *vt, const unsigned char (*font)[16])
+{ vgaterm_set_font_slot(vt, 1, font); }
+
+/* Returns a pointer to the raw per-cell font-select array
+ * [VGA_ROWS * VGA_COLS].  Index as [row * VGA_COLS + col].
+ * Values 0-3 select the corresponding font_table slot.
+ * Write directly; changes take effect on the next vgaterm_blit().      */
+uint8_t *vgaterm_fplane(VGATerm *vt)
+{
+    return vt ? vt->fplane : NULL;
+}
+
+/* Fill a rectangle of cells with the given slot value (0-3).           */
+void vgaterm_set_fplane_rect(VGATerm *vt,
+                              int col, int row, int w, int h,
+                              uint8_t slot)
+{
+    int r, c;
+    if (!vt) return;
+    slot &= 0x03;
+    for (r = row; r < row + h && r < VGA_ROWS; r++)
+        for (c = col; c < col + w && c < VGA_COLS; c++)
+            vt->fplane[r * VGA_COLS + c] = slot;
+}

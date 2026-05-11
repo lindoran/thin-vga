@@ -150,3 +150,30 @@ int vgaterm_fd(VGATerm *vt);
 #include <X11/Xlib.h>
 Display *vgaterm_display(VGATerm *vt);
 Window   vgaterm_window (VGATerm *vt);
+
+/* -------------------------------------------------------------------------
+ * Character generator tables  (4 slots, matching real VGA plane-2)
+ *
+ * slot 0 is the default table -- equivalent to the BIOS font on real VGA.
+ * NULL in any slot falls through to the compiled-in vga_font_8x16.
+ * Per-cell selection is via vgaterm_fplane() / vgaterm_set_fplane_rect().
+ *
+ * vgaterm_set_font / _font_a / _font_b are kept for backward compatibility
+ * and map to slots 0, 0, and 1 respectively.
+ * ------------------------------------------------------------------------- */
+void vgaterm_set_font_slot(VGATerm *vt, int slot,           /* slot: 0-3   */
+                            const unsigned char (*font)[16]);
+void vgaterm_set_font  (VGATerm *vt, const unsigned char (*font)[16]);
+void vgaterm_set_font_a(VGATerm *vt, const unsigned char (*font)[16]);
+void vgaterm_set_font_b(VGATerm *vt, const unsigned char (*font)[16]);
+
+/* Returns a pointer to the raw per-cell font-select array
+ * [VGA_ROWS * VGA_COLS], indexed as [row * VGA_COLS + col].
+ * Values 0-3 select the corresponding slot; write directly.
+ * Changes are visible on the next vgaterm_blit().                      */
+uint8_t *vgaterm_fplane(VGATerm *vt);
+
+/* Fill a rectangle of cells with the given slot value (0-3).           */
+void vgaterm_set_fplane_rect(VGATerm *vt,
+                              int col, int row, int w, int h,
+                              uint8_t slot);

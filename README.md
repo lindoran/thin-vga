@@ -354,6 +354,35 @@ vio_fini();
 vgaterm_close(vt);
 ```
 
+## Font Management & I/O
+
+The `fontio` layer (`fontio.h`) provides utilities for loading and saving 8x16 bitmap fonts in various formats.
+
+- **RAW**: Flat 4096-byte binary (256 glyphs × 16 bytes).
+- **PSF1/PSF2**: Linux PC Screen Font formats.
+- **C Header**: Generates a `.h` file for static inclusion (like `font_vga.h`).
+
+```c
+uint8_t myfont[256][16];
+fontio_load("myfont.psf", myfont);
+vgaterm_set_font_slot(vt, 1, myfont); /* load into slot 1 */
+```
+
+## Font Editor
+
+A built-in font editor (`fontedit.c`) is provided to modify and create CP437-compatible fonts.
+
+```bash
+make fontedit
+./fontedit
+```
+
+### Features:
+- **Pixel Editor**: 8x16 grid for detailed glyph modification.
+- **Character Map**: View and select from all 256 CP437 characters.
+- **Undo**: Simple single-level undo for pixel changes.
+- **Format Support**: Saves directly to C headers for easy integration.
+
 ## Advanced Usage
 
 ### select() / poll() Integration
