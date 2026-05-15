@@ -82,6 +82,21 @@ VGATerm *vgaterm_open(const char *title);
 void vgaterm_close(VGATerm *vt);
 
 /*
+ * vgaterm_setup_scaling  --  configure window scaling.
+ * Must be called after vgaterm_open() and before rendering begins.
+ * 
+ * scale_factor    -- 1 (1x), 2 (2x), or 4 (4x) scaling
+ * 
+ * Returns 0 on success, -1 on error (invalid scale factor or memory failure).
+ * 
+ * Examples:
+ *   vgaterm_setup_scaling(vt, 1);  // 1x (default)
+ *   vgaterm_setup_scaling(vt, 2);  // 2x (double size)
+ *   vgaterm_setup_scaling(vt, 4);  // 4x (quad size)
+ */
+int vgaterm_setup_scaling(VGATerm *vt, int scale_factor);
+
+/*
  * vgaterm_mem  --  return a pointer to the 4000-byte VGA text buffer.
  * Write character/attribute pairs here, then call vgaterm_blit().
  * The buffer is zeroed on creation.

@@ -58,7 +58,7 @@ struct VGATerm {
     Display     *dpy;
     Window       win;
     GC           gc;
-    XImage      *img;          /* 640x400 backing image                    */
+    XImage      *img;          /* backing image (size depends on scale)    */
     Visual      *vis;
     int          depth;
     Atom         wm_del;       /* WM_DELETE_WINDOW atom                    */
@@ -86,7 +86,12 @@ struct VGATerm {
     uint8_t              fplane[VGA_ROWS * VGA_COLS];
 
     /* raw pixel buffer (32bpp BGRA or BGRX depending on display) */
-    uint32_t    *pixels;       /* VGA_PX_W * VGA_PX_H uint32_t            */
+    uint32_t    *pixels;       /* scaled pixel buffer                       */
+
+    /* scaling configuration */
+    int          scale_factor; /* 1x, 2x, or 4x scaling                   */
+    int          current_px_w; /* current pixel width (scaled)             */
+    int          current_px_h; /* current pixel height (scaled)            */
 };
 
 /* -------------------------------------------------------------------------
@@ -107,7 +112,9 @@ static unsigned long map_colour(Display *dpy, Visual *vis, uint32_t rgb)
 
 /* -------------------------------------------------------------------------
  * Render one cell into the pixel buffer
- * ------------------------------------------------------------------------- */
+ * -------------------------------------------------------------------------
+ * Supports 1x, 2x, and 4x scaling with pixel and line replication.
+ */
 static void render_cell(VGATerm *vt, int col, int row, int cursor_here)
 {
     int offset = (row * VGA_COLS + col) * 2;
@@ -117,28 +124,36 @@ static void render_cell(VGATerm *vt, int col, int row, int cursor_here)
     int fg_idx = attr & 0x0F;
     int bg_idx = (attr >> 4) & 0x0F;
 
-    /* If blinking bit (attr bit 7) is set in modes that support it, we just
-     * treat it as high-intensity background.  Most text-mode apps use it
-     * that way when BIOS blink is disabled. */
-
     unsigned long fg_px = vt->px[fg_idx];
     unsigned long bg_px = vt->px[bg_idx];
 
     const unsigned char (*f)[16] = vt->font_table[vt->fplane[row*VGA_COLS+col] & 0x03];
     const unsigned char  *glyph  = f ? f[ch] : vga_font_8x16[ch];
 
-    int base_x = col * 8;
-    int base_y = row * 16;
+    int base_x = col * 8 * vt->scale_factor;
+    int base_y = row * 16 * vt->scale_factor;
+    int scale = vt->scale_factor;
 
-    int r, b;
+    int r, b, yr, xr;
     for (r = 0; r < 16; r++) {
         unsigned char row_bits = glyph[r];
-        uint32_t *scanline = vt->pixels + (base_y + r) * VGA_PX_W + base_x;
-        for (b = 0; b < 8; b++) {
-            int set = (row_bits >> (7 - b)) & 1;
-            /* cursor inverts the cell */
-            if (cursor_here) set = !set;
-            scanline[b] = (uint32_t)(set ? fg_px : bg_px);
+        
+        /* Render row 'r' scaled vertically */
+        for (yr = 0; yr < scale; yr++) {
+            int pixel_row = base_y + r * scale + yr;
+            uint32_t *scanline = vt->pixels + pixel_row * vt->current_px_w + base_x;
+            
+            for (b = 0; b < 8; b++) {
+                int set = (row_bits >> (7 - b)) & 1;
+                /* cursor inverts the cell */
+                if (cursor_here) set = !set;
+                uint32_t pixel_value = (uint32_t)(set ? fg_px : bg_px);
+                
+                /* Render pixel 'b' scaled horizontally */
+                for (xr = 0; xr < scale; xr++) {
+                    scanline[b * scale + xr] = pixel_value;
+                }
+            }
         }
     }
 }
@@ -190,12 +205,18 @@ VGATerm *vgaterm_open(const char *title)
     vt->cur_col = 0;
     vt->cur_row = 0;
     vt->alive   = 1;
+    
+    /* Default: 1x scaling */
+    vt->scale_factor = 1;
+    vt->current_px_w = VGA_PX_W;
+    vt->current_px_h = VGA_PX_H;
+    
     clock_gettime(CLOCK_MONOTONIC, &vt->cur_time);
 
     /* Allocate pixel buffer (32bpp, width * height) */
-    vt->pixels = (uint32_t *)malloc(VGA_PX_W * VGA_PX_H * sizeof(uint32_t));
+    vt->pixels = (uint32_t *)malloc(vt->current_px_w * vt->current_px_h * sizeof(uint32_t));
     if (!vt->pixels) { free(vt); return NULL; }
-    memset(vt->pixels, 0, VGA_PX_W * VGA_PX_H * sizeof(uint32_t));
+    memset(vt->pixels, 0, vt->current_px_w * vt->current_px_h * sizeof(uint32_t));
 
     /* Open display */
     vt->dpy = XOpenDisplay(NULL);
@@ -219,7 +240,7 @@ VGATerm *vgaterm_open(const char *title)
 
     vt->win = XCreateWindow(
         vt->dpy, RootWindow(vt->dpy, screen),
-        0, 0, VGA_PX_W, VGA_PX_H, 0,
+        0, 0, vt->current_px_w, vt->current_px_h, 0,
         vt->depth, InputOutput, vt->vis,
         CWBackPixel | CWBorderPixel | CWEventMask, &xswa
     );
@@ -227,8 +248,8 @@ VGATerm *vgaterm_open(const char *title)
     /* Lock the size */
     memset(&hints, 0, sizeof(hints));
     hints.flags      = PMinSize | PMaxSize | PBaseSize;
-    hints.min_width  = hints.max_width  = hints.base_width  = VGA_PX_W;
-    hints.min_height = hints.max_height = hints.base_height = VGA_PX_H;
+    hints.min_width  = hints.max_width  = hints.base_width  = vt->current_px_w;
+    hints.min_height = hints.max_height = hints.base_height = vt->current_px_h;
     XSetWMNormalHints(vt->dpy, vt->win, &hints);
 
     /* Window title */
@@ -246,9 +267,9 @@ VGATerm *vgaterm_open(const char *title)
         vt->dpy, vt->vis, vt->depth,
         ZPixmap, 0,
         (char *)vt->pixels,
-        VGA_PX_W, VGA_PX_H,
+        vt->current_px_w, vt->current_px_h,
         32,          /* bitmap_pad */
-        VGA_PX_W * 4 /* bytes_per_line */
+        vt->current_px_w * 4 /* bytes_per_line */
     );
     if (!vt->img) {
         fprintf(stderr, "vgaterm: XCreateImage failed\n");
@@ -261,6 +282,94 @@ VGATerm *vgaterm_open(const char *title)
     XFlush(vt->dpy);
 
     return vt;
+}
+
+/* =========================================================================
+ * Setup scaling
+ * =========================================================================
+ * Configures the window for 1x, 2x, or 4x scaling.
+ * Must be called after vgaterm_open() and before rendering begins.
+ * When scaling is changed, the window is resized and the pixel buffer is
+ * reallocated. To minimize artifacts, change scaling before writing to the
+ * text buffer or call vgaterm_cls() after scaling to clear the display.
+ *
+ * Parameters:
+ *   scale_factor  -- 1, 2, or 4 for 1x, 2x, or 4x scaling
+ * Returns 0 on success, -1 on failure (e.g., invalid scale factor).
+ */
+int vgaterm_setup_scaling(VGATerm *vt, int scale_factor)
+{
+    int new_width, new_height;
+    uint32_t *new_pixels;
+    XImage *new_img;
+    XSizeHints hints;
+
+    if (!vt || vt->scale_factor == 0) return -1;
+
+    /* Validate scale factor */
+    if (scale_factor != 1 && scale_factor != 2 && scale_factor != 4) {
+        fprintf(stderr, "vgaterm_setup_scaling: invalid scale factor %d (must be 1, 2, or 4)\n",
+                scale_factor);
+        return -1;
+    }
+
+    /* Calculate new dimensions */
+    new_width  = VGA_PX_W * scale_factor;
+    new_height = VGA_PX_H * scale_factor;
+
+    /* If scaling hasn't actually changed, no-op */
+    if (scale_factor == vt->scale_factor) {
+        return 0;
+    }
+
+    /* Allocate new pixel buffer */
+    new_pixels = (uint32_t *)malloc(new_width * new_height * sizeof(uint32_t));
+    if (!new_pixels) {
+        fprintf(stderr, "vgaterm_setup_scaling: failed to allocate pixel buffer\n");
+        return -1;
+    }
+    memset(new_pixels, 0, new_width * new_height * sizeof(uint32_t));
+
+    /* Create new XImage with new dimensions */
+    new_img = XCreateImage(
+        vt->dpy, vt->vis, vt->depth,
+        ZPixmap, 0,
+        (char *)new_pixels,
+        new_width, new_height,
+        32,          /* bitmap_pad */
+        new_width * 4 /* bytes_per_line */
+    );
+    if (!new_img) {
+        fprintf(stderr, "vgaterm_setup_scaling: XCreateImage failed\n");
+        free(new_pixels);
+        return -1;
+    }
+
+    /* Destroy old image (but don't free pixels, we'll do that ourselves) */
+    vt->img->data = NULL;
+    XDestroyImage(vt->img);
+    free(vt->pixels);
+
+    /* Update VGATerm state */
+    vt->pixels       = new_pixels;
+    vt->img          = new_img;
+    vt->scale_factor = scale_factor;
+    vt->current_px_w = new_width;
+    vt->current_px_h = new_height;
+
+    /* Resize the X11 window */
+    XResizeWindow(vt->dpy, vt->win, new_width, new_height);
+
+    /* Update size hints to lock new dimensions */
+    memset(&hints, 0, sizeof(hints));
+    hints.flags      = PMinSize | PMaxSize | PBaseSize;
+    hints.min_width  = hints.max_width  = hints.base_width  = new_width;
+    hints.min_height = hints.max_height = hints.base_height = new_height;
+    XSetWMNormalHints(vt->dpy, vt->win, &hints);
+
+    XFlush(vt->dpy);
+
+    return 0;
 }
 
 void vgaterm_close(VGATerm *vt)
@@ -288,7 +397,7 @@ void vgaterm_blit(VGATerm *vt)
     draw_cur = cursor_blink_on(vt);
     render_all(vt, draw_cur);
     XPutImage(vt->dpy, vt->win, vt->gc, vt->img,
-              0, 0, 0, 0, VGA_PX_W, VGA_PX_H);
+              0, 0, 0, 0, vt->current_px_w, vt->current_px_h);
     XFlush(vt->dpy);
     vt->cur_visible = draw_cur;
 }
@@ -304,7 +413,7 @@ int vgaterm_events(VGATerm *vt)
             if (ev.xexpose.count == 0) {
                 /* Re-blit after expose without re-rendering */
                 XPutImage(vt->dpy, vt->win, vt->gc, vt->img,
-                          0, 0, 0, 0, VGA_PX_W, VGA_PX_H);
+                          0, 0, 0, 0, vt->current_px_w, vt->current_px_h);
                 XFlush(vt->dpy);
             }
             break;
