@@ -28,7 +28,7 @@ Thin VGA won't let you make poor coding choices like curses will. You simply can
 - **Authentic VGA emulation** — Real 80×25 text mode with genuine CP437 character set
 - **Direct memory access** — Write to a 4000-byte buffer exactly like real VGA (0xB8000)
 - **16-color palette** — Full CGA color support with true bitmap rendering
-- **Zero dependencies** — Only requires X11 and the `kbd` package (for fonts)
+- **Zero dependencies** — Only requires X11
 - **Box-drawing support** — Includes all CP437 box-drawing and symbol characters (☺ ☻ ♥ ♦ …)
 - **Minimal code** — ~300 lines, perfect for learning or embedding
 - **select()/poll() ready** — Integrates cleanly with event loops
@@ -153,13 +153,13 @@ int      vgaterm_fd(VGATerm *vt);           /* X11 fd for select/poll  */
 
 ```bash
 # Debian / Ubuntu
-sudo apt install libx11-dev kbd
+sudo apt install libx11-dev
 
 # Fedora / RHEL
-sudo dnf install libX11-devel kbd
+sudo dnf install libX11-devel
 
 # Arch
-sudo pacman -S libx11 kbd
+sudo pacman -S libx11
 ```
 
 ### Building & Demo
@@ -171,19 +171,24 @@ make demo     # also runs the demo
 
 ## Font Regeneration
 
-`font_vga.h` is generated automatically by `make` via `mkfont.py`.  It merges all
-`*VGA16*.psf.gz` fonts found under `/usr/share/consolefonts` (and similar
-paths) into a complete 256-entry CP437 glyph table using the PSF Unicode maps.
+`font_vga.h` is pre-generated and committed to the repo — you do not need to
+regenerate it under normal circumstances.
+
+If you do need to regenerate it (e.g. after modifying `mkfont.py`):
 
 ```bash
-make font     # force regeneration
+sudo apt install python3-fonttools
+python3 mkfont.py Bm437_IBM_VGA_8x16.otb > font_vga.h
 ```
 
-To use a specific font file:
+The script requires `Bm437_IBM_VGA_8x16.otb` to be present alongside it and
+will exit with a clear error if it is missing. It does not fall back to system
+fonts — that was the original source of incorrect box-drawing characters in
+earlier versions of this project.
 
-```bash
-python3 mkfont.py /path/to/myfont.psf.gz > font_vga.h
-```
+> **If box-drawing characters look wrong in your application, `font_vga.h` is
+> the first place to check.** Regenerate it from the OTB using the command
+> above and verify the output.
 
 ## Integration
 
@@ -408,10 +413,12 @@ manager cannot resize it.
 
 ### Font
 
-The 8×16 bitmap font is built from the `*VGA16*.psf.gz` console fonts shipped
-with the `kbd` package.  These fonts are derived from the original IBM VGA ROM
-and cover the full CP437 character set including box-drawing characters,
-block elements, and the classic symbol characters (☺ ☻ ♥ ♦ …).
+`font_vga.h` contains 256 glyphs extracted from `Bm437_IBM_VGA_8x16.otb`,
+part of the [Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/)
+by VileR (CC BY-SA 4.0).  This is a faithful recreation of the original IBM
+VGA ROM font covering the full CP437 character set — including all box-drawing
+characters (single and double line), block elements, and classic symbols
+(☺ ☻ ♥ ♦ …).  All 48 box-drawing glyphs in the CP437 range are distinct.
 
 ## License
 
@@ -436,3 +443,10 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+### Font
+
+`font_vga.h` and `Bm437_IBM_VGA_8x16.otb` are derived from the
+[Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/)
+by VileR, and are licensed separately under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).

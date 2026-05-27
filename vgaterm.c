@@ -84,6 +84,7 @@ struct VGATerm {
      * All slots zero-initialised by calloc (=> built-in font everywhere). */
     const unsigned char (*font_table[4])[16];
     uint8_t              fplane[VGA_ROWS * VGA_COLS];
+    uint8_t              uplane[VGA_ROWS * VGA_COLS]; /* underline per cell */
 
     /* raw pixel buffer (32bpp BGRA or BGRX depending on display) */
     uint32_t    *pixels;       /* scaled pixel buffer                       */
@@ -135,8 +136,11 @@ static void render_cell(VGATerm *vt, int col, int row, int cursor_here)
     int scale = vt->scale_factor;
 
     int r, b, yr, xr;
+    int underline = vt->uplane[row * VGA_COLS + col];
     for (r = 0; r < 16; r++) {
         unsigned char row_bits = glyph[r];
+        if (underline && r == 14)
+            row_bits = 0xFF;
         
         /* Render row 'r' scaled vertically */
         for (yr = 0; yr < scale; yr++) {
@@ -524,6 +528,11 @@ void vgaterm_set_font_b(VGATerm *vt, const unsigned char (*font)[16])
 uint8_t *vgaterm_fplane(VGATerm *vt)
 {
     return vt ? vt->fplane : NULL;
+}
+
+uint8_t *vgaterm_uplane(VGATerm *vt)
+{
+    return vt ? vt->uplane : NULL;
 }
 
 /* Fill a rectangle of cells with the given slot value (0-3).           */

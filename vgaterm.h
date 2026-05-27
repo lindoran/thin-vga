@@ -188,6 +188,11 @@ void vgaterm_set_font_b(VGATerm *vt, const unsigned char (*font)[16]);
  * Changes are visible on the next vgaterm_blit().                      */
 uint8_t *vgaterm_fplane(VGATerm *vt);
 
+/* Returns a pointer to the per-cell underline array [VGA_ROWS * VGA_COLS].
+ * Set a byte non-zero to draw a solid line across scanline 14 of that cell.
+ * Changes take effect on the next vgaterm_blit().                          */
+uint8_t *vgaterm_uplane(VGATerm *vt);
+
 /* Fill a rectangle of cells with the given slot value (0-3).           */
 void vgaterm_set_fplane_rect(VGATerm *vt,
                               int col, int row, int w, int h,

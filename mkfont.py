@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-mkfont.py  --  generate font_vga.h from system PSF console fonts.
+mkfont.py  --  generate font_vga.h from Bm437_IBM_VGA_8x16.otb
 
-Merges all *VGA16*.psf.gz fonts found on the system into a complete 256-entry
-CP437 glyph table, using the PSF Unicode tables to map code points correctly.
+Source font: Ultimate Oldschool PC Font Pack by VileR
+  Copyright (C) 2016 VileR, CC BY-SA 4.0
+  https://int10h.org/oldschool-pc-fonts/
 
-Output goes to stdout; redirect to font_vga.h:
-    python3 mkfont.py > font_vga.h
+Usage:
+    python3 mkfont.py [path/to/Bm437_IBM_VGA_8x16.otb] > font_vga.h
 
-Requires: kbd or console-setup package (for the PSF fonts)
-  Debian/Ubuntu:  sudo apt install kbd
-  Fedora/RHEL:    sudo dnf install kbd
-  Arch:           sudo pacman -S kbd
+Requires:
+    sudo apt install python3-fonttools
 """
 
-import gzip
-import glob
 import struct
 import sys
 import os
 
-# CP437 byte value -> Unicode code point mapping
-# (standard IBM Code Page 437)
+# ---------------------------------------------------------------------------
+# CP437 byte value -> Unicode code point
+# ---------------------------------------------------------------------------
 CP437_TO_UNICODE = [
     0x0000, 0x263A, 0x263B, 0x2665, 0x2666, 0x2663, 0x2660, 0x2022,
     0x25D8, 0x25CB, 0x25D9, 0x2642, 0x2640, 0x266A, 0x266B, 0x263C,
@@ -59,154 +57,82 @@ CP437_TO_UNICODE = [
 ]
 assert len(CP437_TO_UNICODE) == 256
 
-# Hand-drawn fallback bitmaps for glyphs not found in any system font
-FALLBACK_BITMAPS = {
-    # U+0000 NUL -- blank
-    0x0000: bytes(16),
-    # U+25BA ► right-pointing solid arrowhead
-    0x25BA: bytes([0x00,0x00,0x20,0x30,0x38,0x3C,0x3E,0x3F,
-                   0x3E,0x3C,0x38,0x30,0x20,0x00,0x00,0x00]),
-    # U+25C4 ◄ left-pointing solid arrowhead
-    0x25C4: bytes([0x00,0x00,0x04,0x0C,0x1C,0x3C,0x7C,0xFC,
-                   0x7C,0x3C,0x1C,0x0C,0x04,0x00,0x00,0x00]),
-}
+# Intentionally blank glyphs — not missing, just empty
+INTENTIONAL_BLANKS = {0x0000, 0x0020, 0x00A0}
 
-SEARCH_PATHS = [
-    '/usr/share/consolefonts',
-    '/usr/share/kbd/consolefonts',
-    '/lib/kbd/consolefonts',
-]
-
-
-def load_psf1(path):
-    """Load a PSF1 font file (.psf or .psf.gz).
-    Returns dict: unicode_codepoint -> 16-byte bitmap, or {} on error."""
+# ---------------------------------------------------------------------------
+# OTB font reader
+# ---------------------------------------------------------------------------
+def load_otb(path):
+    """
+    Load an OTB bitmap font. Returns dict: unicode_codepoint -> 16-byte bitmap.
+    Exits with a clear error if the file cannot be loaded.
+    """
     try:
-        opener = gzip.open if path.endswith('.gz') else open
-        with opener(path, 'rb') as f:
-            raw = f.read()
-    except Exception as e:
-        print(f"# Warning: could not read {path}: {e}", file=sys.stderr)
-        return {}
-
-    if raw[:2] != b'\x36\x04':
-        return {}  # not PSF1
-
-    mode = raw[2]
-    charsize = raw[3]
-    num_glyphs = 512 if (mode & 1) else 256
-    has_unicode = bool(mode & 2)
-
-    glyph_data = raw[4:4 + num_glyphs * charsize]
-    result = {}
-
-    if has_unicode:
-        ut = raw[4 + num_glyphs * charsize:]
-        i = 0
-        glyph_idx = 0
-        while i + 1 < len(ut) and glyph_idx < num_glyphs:
-            bitmap = glyph_data[glyph_idx * charsize:(glyph_idx + 1) * charsize]
-            while i + 1 < len(ut):
-                cp = struct.unpack_from('<H', ut, i)[0]
-                i += 2
-                if cp == 0xFFFF:
-                    break
-                elif cp == 0xFFFE:
-                    continue
-                else:
-                    if cp not in result:
-                        result[cp] = bitmap
-            glyph_idx += 1
-    return result
-
-
-def load_psf2(path):
-    """Load a PSF2 font file (.psf or .psf.gz).
-    Returns dict: unicode_codepoint -> height-byte bitmap, or {} on error."""
-    try:
-        opener = gzip.open if path.endswith('.gz') else open
-        with opener(path, 'rb') as f:
-            raw = f.read()
-    except Exception:
-        return {}
-
-    PSF2_MAGIC = b'\x72\xb5\x4a\x86'
-    if raw[:4] != PSF2_MAGIC:
-        return {}
-
-    (version, headersize, flags, num_glyphs,
-     bytes_per_glyph, height, width) = struct.unpack('<IIIIIII', raw[4:32])
-
-    if height != 16 or width != 8:
-        return {}  # we only want 8x16
-
-    has_unicode = bool(flags & 1)
-    glyph_data = raw[headersize:headersize + num_glyphs * bytes_per_glyph]
-    result = {}
-
-    if has_unicode:
-        ut_raw = raw[headersize + num_glyphs * bytes_per_glyph:]
-        glyph_idx = 0
-        i = 0
-        while i < len(ut_raw) and glyph_idx < num_glyphs:
-            bitmap = glyph_data[glyph_idx * bytes_per_glyph:
-                                 (glyph_idx + 1) * bytes_per_glyph]
-            while i < len(ut_raw) and ut_raw[i] != 0xFF:
-                b = ut_raw[i]
-                if b < 0x80:
-                    cp = b; i += 1
-                elif b < 0xE0:
-                    cp = ((b & 0x1F) << 6) | (ut_raw[i+1] & 0x3F); i += 2
-                elif b < 0xF0:
-                    cp = ((b & 0x0F) << 12) | ((ut_raw[i+1] & 0x3F) << 6) | \
-                         (ut_raw[i+2] & 0x3F); i += 3
-                else:
-                    cp = ((b & 0x07) << 18) | ((ut_raw[i+1] & 0x3F) << 12) | \
-                         ((ut_raw[i+2] & 0x3F) << 6) | (ut_raw[i+3] & 0x3F)
-                    i += 4
-                if b != 0xFE and cp not in result:
-                    result[cp] = bitmap
-            i += 1  # skip 0xFF terminator
-            glyph_idx += 1
-
-    return result
-
-
-def find_fonts():
-    """Return a list of PSF font paths, VGA16 fonts first."""
-    paths = []
-    for d in SEARCH_PATHS:
-        if not os.path.isdir(d):
-            continue
-        # Prefer VGA16 fonts (most faithful to the original VGA ROM)
-        for pat in ['*VGA16*.psf.gz', '*VGA16*.psf',
-                    '*.psf.gz',       '*.psf']:
-            for p in sorted(glob.glob(os.path.join(d, pat))):
-                if p not in paths:
-                    paths.append(p)
-    return paths
-
-
-def main():
-    fonts = find_fonts()
-    if not fonts:
-        print("# ERROR: no PSF fonts found.", file=sys.stderr)
-        print("# Install kbd:  sudo apt install kbd", file=sys.stderr)
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        print("ERROR: fonttools is not installed.", file=sys.stderr)
+        print("  sudo apt install python3-fonttools", file=sys.stderr)
         sys.exit(1)
 
-    # Merge all fonts into one unicode->bitmap dict (first found wins)
-    unicode_bitmaps = dict(FALLBACK_BITMAPS)
-    loaded = 0
-    for path in fonts:
-        bitmaps = load_psf1(path) or load_psf2(path)
-        if bitmaps:
-            for cp, bmp in bitmaps.items():
-                if cp not in unicode_bitmaps and len(bmp) == 16:
-                    unicode_bitmaps[cp] = bmp
-            loaded += 1
+    try:
+        font = TTFont(path)
+    except Exception as e:
+        print(f"ERROR: could not open {path}: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    print(f"# Loaded {loaded} PSF font(s), "
-          f"{len(unicode_bitmaps)} unique glyphs", file=sys.stderr)
+    if 'EBDT' not in font:
+        print(f"ERROR: {path} has no EBDT bitmap table.", file=sys.stderr)
+        sys.exit(1)
+
+    cmap = font.getBestCmap()
+    if not cmap:
+        print(f"ERROR: {path} has no usable cmap.", file=sys.stderr)
+        sys.exit(1)
+
+    ebdt_strike = font['EBDT'].strikeData[0]
+    result = {}
+
+    for ucp, gname in cmap.items():
+        bm = ebdt_strike.get(gname)
+        if bm is None:
+            continue
+        fmt  = bm.getFormat()
+        data = bm.imageData
+        if fmt == 5:
+            if len(data) == 16:
+                result[ucp] = bytes(data)
+        elif fmt == 2:
+            sm        = bm.metrics
+            row_bytes = (sm.width + 7) // 8
+            rows      = bytearray(16)
+            for i in range(min(sm.height, 16)):
+                chunk = data[i * row_bytes:(i + 1) * row_bytes]
+                if chunk:
+                    rows[i] = chunk[0]
+            result[ucp] = bytes(rows)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    if len(sys.argv) > 1:
+        otb_path = sys.argv[1]
+    else:
+        otb_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                'Bm437_IBM_VGA_8x16.otb')
+
+    if not os.path.exists(otb_path):
+        print(f"ERROR: OTB font not found: {otb_path}", file=sys.stderr)
+        print( "  The font file should be in the same directory as this script.", file=sys.stderr)
+        print( "  Download from: https://int10h.org/oldschool-pc-fonts/", file=sys.stderr)
+        sys.exit(1)
+
+    unicode_bitmaps = load_otb(otb_path)
+    print(f"# Loaded {len(unicode_bitmaps)} glyphs from {otb_path}", file=sys.stderr)
 
     # Build the 256-entry CP437 table
     cp437_bitmaps = []
@@ -215,25 +141,44 @@ def main():
         ucp = CP437_TO_UNICODE[byte_val]
         bmp = unicode_bitmaps.get(ucp)
         if bmp is None:
-            missing.append((byte_val, ucp))
-            bmp = bytes(16)  # blank fallback
+            if ucp not in INTENTIONAL_BLANKS:
+                missing.append((byte_val, ucp))
+            bmp = bytes(16)
         cp437_bitmaps.append(bmp)
 
     if missing:
-        print(f"# Warning: {len(missing)} CP437 glyphs not found "
-              f"(using blank):", file=sys.stderr)
+        print(f"WARNING: {len(missing)} CP437 glyphs missing from OTB (blank fallback used):",
+              file=sys.stderr)
         for bv, ucp in missing:
-            print(f"#   CP437 0x{bv:02X} = U+{ucp:04X}", file=sys.stderr)
+            print(f"  CP437 0x{bv:02X} = U+{ucp:04X}", file=sys.stderr)
+        print("WARNING: box-drawing characters may render incorrectly.", file=sys.stderr)
+
+    # Sanity check: box-drawing distinctness
+    def idx(ucp):
+        return CP437_TO_UNICODE.index(ucp)
+    checks = [
+        (0x2500, 0x2550, "─ vs ═"),
+        (0x2502, 0x2551, "│ vs ║"),
+        (0x2524, 0x2563, "┤ vs ╣"),
+        (0x251C, 0x2560, "├ vs ╠"),
+    ]
+    for a, b, label in checks:
+        if cp437_bitmaps[idx(a)] == cp437_bitmaps[idx(b)]:
+            print(f"WARNING: {label} (U+{a:04X} / U+{b:04X}) have identical bitmaps — "
+                  f"box-drawing will be wrong!", file=sys.stderr)
 
     # Emit the C header
     print("/* font_vga.h  --  VGA 8x16 CP437 font bitmap table")
     print(" *")
-    print(" * Auto-generated by mkfont.py from system PSF console fonts.")
-    print(" * The source fonts are derived from the IBM VGA ROM and are")
-    print(" * distributed as part of the Linux kbd/console-setup project.")
+    print(" * Auto-generated by mkfont.py")
+    print(" * Source: Bm437_IBM_VGA_8x16.otb")
+    print(" *   Ultimate Oldschool PC Font Pack by VileR")
+    print(" *   Copyright (C) 2016 VileR, CC BY-SA 4.0")
+    print(" *   https://int10h.org/oldschool-pc-fonts/")
     print(" *")
     print(" * Regenerate:")
-    print(" *   python3 mkfont.py > font_vga.h")
+    print(" *   python3 mkfont.py [path/to/Bm437_IBM_VGA_8x16.otb] > font_vga.h")
+    print(" *   Requires: sudo apt install python3-fonttools")
     print(" *")
     print(" * Each row is 8 pixels wide; MSB is the leftmost pixel.")
     print(" * Index with:  vga_font_8x16[cp437_byte][scanline_row]")
