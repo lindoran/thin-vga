@@ -21,6 +21,9 @@
  *   Ctrl+Z           undo last pixel change
  *   F1               toggle help bar
  *   Ctrl+Q / F10     quit
+ *
+ * Usage:
+ *   ./fontedit [font.raw|font.psf|font.h]
  */
 
 #define _POSIX_C_SOURCE 199309L
@@ -51,6 +54,14 @@ static VGATerm *vt_g = NULL;
 static void fp_set(int col, int row, int w, int h)
 {
     vgaterm_set_fplane_rect(vt_g, col, row, w, h, 1);
+}
+
+static void set_save_filename(const char *path)
+{
+    if (!path || !path[0]) return;
+
+    strncpy(save_filename, path, DLG_FIELD_MAX);
+    save_filename[DLG_FIELD_MAX] = '\0';
 }
 
 /* Simple single-level undo: save the previous state of one glyph row. */
@@ -546,7 +557,7 @@ static void flash_msg(const char *msg, uint8_t attr)
  * Main
  * ----------------------------------------------------------------------- */
 
-int main(void)
+int main(int argc, char **argv)
 {
     int k;
     VGATerm *vt;
@@ -554,6 +565,15 @@ int main(void)
     /* initialise working font from compiled-in table */
     memcpy(font, vga_font_8x16, sizeof(font));
     undo_buf.valid = 0;
+
+    if (argc > 1) {
+        int err = fontio_load(argv[1], font);
+        if (err != FONTIO_OK) {
+            fprintf(stderr, "fontedit: %s: %s\n", argv[1], fontio_strerror(err));
+            return 1;
+        }
+        set_save_filename(argv[1]);
+    }
 
     /* sync charmap cursor to initial glyph */
     mx = glyph % CM_COLS;

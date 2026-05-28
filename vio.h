@@ -214,8 +214,6 @@ int vio_getch(void);
  */
 int vio_kbhit(void);
 
-#endif /* VIO_H */
-
 /* -----------------------------------------------------------------------
  * Numeric output
  *
@@ -292,3 +290,5 @@ void vio_box(int col, int row, int w, int h, uint8_t attr);
  * vio_dbox  --  same with double-line borders:  ╔═╗║╚╝
  */
 void vio_dbox(int col, int row, int w, int h, uint8_t attr);
+
+#endif /* VIO_H */

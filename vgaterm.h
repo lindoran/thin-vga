@@ -153,8 +153,6 @@ void vgaterm_scroll(VGATerm *vt, int n, uint8_t attr);
  */
 int vgaterm_fd(VGATerm *vt);
 
-#endif /* VGATERM_H */
-
 /* ---------- X11 accessors (for composition with higher layers) ---------- */
 
 /*
@@ -197,3 +195,5 @@ uint8_t *vgaterm_uplane(VGATerm *vt);
 void vgaterm_set_fplane_rect(VGATerm *vt,
                               int col, int row, int w, int h,
                               uint8_t slot);
+
+#endif /* VGATERM_H */

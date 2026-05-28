@@ -12,9 +12,8 @@
  *             Modern variant; also widely available.  Unicode tables are
  *             silently ignored on load and not written on save.
  *
- *   H      -- C header (save only).  Produces a drop-in replacement for
- *             font_vga.h.  Loading .h files requires a recompile; use
- *             RAW or PSF for runtime font swapping.
+ *   H      -- C header.  Produces or reads a drop-in replacement for
+ *             font_vga.h.
  *
  * All load functions fill exactly buf[256][16].  If a PSF file contains
  * more than 256 glyphs, only the first 256 are loaded.
@@ -52,7 +51,8 @@ typedef enum {
     FONTIO_FMT_UNKNOWN = 0,
     FONTIO_FMT_RAW,
     FONTIO_FMT_PSF1,
-    FONTIO_FMT_PSF2
+    FONTIO_FMT_PSF2,
+    FONTIO_FMT_H
 } FontioFmt;
 
 /* Peek at the file header and return the detected format.
@@ -71,6 +71,7 @@ int fontio_load    (const char *path, uint8_t buf[256][16]);
 int fontio_load_raw (const char *path, uint8_t buf[256][16]);
 int fontio_load_psf1(const char *path, uint8_t buf[256][16]);
 int fontio_load_psf2(const char *path, uint8_t buf[256][16]);
+int fontio_load_h   (const char *path, uint8_t buf[256][16]);
 
 /* Accepts either PSF variant; auto-detects which one.                   */
 int fontio_load_psf (const char *path, uint8_t buf[256][16]);

@@ -1,0 +1,11 @@
+*.a
+*.o
+
+demo_test
+editor
+fontedit
+scaling_demo
+vgaterm_demo
+
+core
+vgcore.*

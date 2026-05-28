@@ -8,6 +8,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 /* -----------------------------------------------------------------------
  * Internal constants
@@ -60,6 +62,7 @@ const char *fontio_strerror(int err)
 FontioFmt fontio_detect(const char *path)
 {
     unsigned char hdr[4] = {0, 0, 0, 0};
+    const char *dot;
     FILE *f = fopen(path, "rb");
     if (!f) return FONTIO_FMT_UNKNOWN;
     if (fread(hdr, 1, 4, f) < 4) { fclose(f); return FONTIO_FMT_UNKNOWN; }
@@ -71,6 +74,10 @@ FontioFmt fontio_detect(const char *path)
 
     if (hdr[0] == PSF1_MAGIC0 && hdr[1] == PSF1_MAGIC1)
         return FONTIO_FMT_PSF1;
+
+    dot = strrchr(path, '.');
+    if (dot && (strcmp(dot, ".h") == 0 || strcmp(dot, ".H") == 0))
+        return FONTIO_FMT_H;
 
     return FONTIO_FMT_RAW;
 }
@@ -195,6 +202,110 @@ int fontio_load_psf2(const char *path, uint8_t buf[256][16])
 }
 
 /* -----------------------------------------------------------------------
+ * Load: C header
+ * ----------------------------------------------------------------------- */
+
+static int skip_c_comment(FILE *f, int c)
+{
+    int n;
+
+    if (c != '/') return c;
+
+    n = fgetc(f);
+    if (n == '/') {
+        while ((c = fgetc(f)) != EOF && c != '\n') { }
+        return c;
+    }
+    if (n == '*') {
+        int prev = 0;
+        while ((c = fgetc(f)) != EOF) {
+            if (prev == '*' && c == '/') return ' ';
+            prev = c;
+        }
+        return EOF;
+    }
+
+    if (n != EOF) ungetc(n, f);
+    return c;
+}
+
+static int read_c_int(FILE *f, int first, unsigned int *out)
+{
+    char tok[32];
+    int len = 0;
+    int c = first;
+    int base = 10;
+    unsigned long v = 0;
+    char *end;
+
+    tok[len++] = (char)c;
+    if (c == '0') {
+        c = fgetc(f);
+        if (c == 'x' || c == 'X') {
+            tok[len++] = (char)c;
+            base = 16;
+        } else if (c != EOF) {
+            ungetc(c, f);
+        }
+    }
+
+    while ((c = fgetc(f)) != EOF) {
+        if (!isxdigit((unsigned char)c)) {
+            ungetc(c, f);
+            break;
+        }
+        if (len < (int)sizeof(tok) - 1)
+            tok[len++] = (char)c;
+    }
+    tok[len] = '\0';
+
+    v = strtoul(tok, &end, base);
+    if (end == tok || *end != '\0' || v > 0xFFul)
+        return 0;
+
+    *out = (unsigned int)v;
+    return 1;
+}
+
+int fontio_load_h(const char *path, uint8_t buf[256][16])
+{
+    FILE *f;
+    int c;
+    int in_init = 0;
+    int count = 0;
+
+    f = fopen(path, "r");
+    if (!f) return FONTIO_ERR_OPEN;
+
+    while ((c = fgetc(f)) != EOF) {
+        c = skip_c_comment(f, c);
+        if (c == EOF) break;
+
+        if (!in_init) {
+            if (c == '=') in_init = 1;
+            continue;
+        }
+
+        if (isdigit((unsigned char)c)) {
+            unsigned int v;
+            if (!read_c_int(f, c, &v)) {
+                fclose(f);
+                return FONTIO_ERR_FORMAT;
+            }
+            if (count < RAW_SIZE)
+                ((uint8_t *)buf)[count] = (uint8_t)v;
+            count++;
+        }
+    }
+
+    fclose(f);
+
+    if (!in_init) return FONTIO_ERR_FORMAT;
+    if (count < RAW_SIZE) return FONTIO_ERR_GLYPHS;
+    return FONTIO_OK;
+}
+
+/* -----------------------------------------------------------------------
  * Load: PSF (auto-detect v1 vs v2)
  * ----------------------------------------------------------------------- */
 
@@ -215,6 +326,7 @@ int fontio_load(const char *path, uint8_t buf[256][16])
     switch (fontio_detect(path)) {
     case FONTIO_FMT_PSF1: return fontio_load_psf1(path, buf);
     case FONTIO_FMT_PSF2: return fontio_load_psf2(path, buf);
+    case FONTIO_FMT_H:    return fontio_load_h   (path, buf);
     default:              return fontio_load_raw (path, buf);
     }
 }

@@ -44,6 +44,11 @@ void vio_init(VGATerm *vt)
     s_attr  = VGA_ATTR_DEFAULT;
     s_alive = 1;
 
+    if (!s_dpy || !s_win) {
+        s_alive = 0;
+        return;
+    }
+
     /* Add keyboard events to the window's existing event mask */
     XSelectInput(s_dpy, s_win,
                  ExposureMask        |
@@ -100,6 +105,7 @@ void vio_putch_at(int col, int row, uint8_t ch, uint8_t attr)
 
 void vio_puts(const char *s)
 {
+    if (!s) return;
     while (*s && s_col < VGA_COLS)
         vio_putch((uint8_t)*s++);
 }
@@ -107,6 +113,7 @@ void vio_puts(const char *s)
 void vio_puts_n(const char *s, int n)
 {
     int i;
+    if (!s) s = "";
     for (i = 0; i < n && s_col < VGA_COLS; i++) {
         vio_putch(s[i] ? (uint8_t)s[i] : (uint8_t)' ');
         if (!s[i]) s = "";   /* pad remainder with spaces */
@@ -289,7 +296,7 @@ int vio_getch(void)
     XEvent ev;
     int    k;
 
-    if (!s_alive) return KEY_CLOSED;
+    if (!s_alive || !s_dpy) return KEY_CLOSED;
 
     for (;;) {
         XNextEvent(s_dpy, &ev);
@@ -305,7 +312,7 @@ int vio_kbhit(void)
     XEvent ev;
     int    k;
 
-    if (!s_alive) return KEY_CLOSED;
+    if (!s_alive || !s_dpy) return KEY_CLOSED;
 
     while (XPending(s_dpy)) {
         XNextEvent(s_dpy, &ev);

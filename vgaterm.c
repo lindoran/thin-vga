@@ -391,7 +391,7 @@ void vgaterm_close(VGATerm *vt)
 
 uint8_t *vgaterm_mem(VGATerm *vt)
 {
-    return vt->mem;
+    return vt ? vt->mem : NULL;
 }
 
 void vgaterm_blit(VGATerm *vt)
@@ -495,8 +495,8 @@ void vgaterm_scroll(VGATerm *vt, int n, uint8_t attr)
 }
 
 /* ---------- X11 accessors ----------------------------------------- */
-Display *vgaterm_display(VGATerm *vt) { return vt->dpy; }
-Window   vgaterm_window (VGATerm *vt) { return vt->win; }
+Display *vgaterm_display(VGATerm *vt) { return vt ? vt->dpy : NULL; }
+Window   vgaterm_window (VGATerm *vt) { return vt ? vt->win : 0; }
 
 /* -------------------------------------------------------------------------
  * Character generator table API  (4 slots, matching real VGA plane 2)
@@ -542,8 +542,13 @@ void vgaterm_set_fplane_rect(VGATerm *vt,
 {
     int r, c;
     if (!vt) return;
+    if (col < 0) { w += col; col = 0; }
+    if (row < 0) { h += row; row = 0; }
+    if (col + w > VGA_COLS) w = VGA_COLS - col;
+    if (row + h > VGA_ROWS) h = VGA_ROWS - row;
+    if (w <= 0 || h <= 0) return;
     slot &= 0x03;
-    for (r = row; r < row + h && r < VGA_ROWS; r++)
-        for (c = col; c < col + w && c < VGA_COLS; c++)
+    for (r = row; r < row + h; r++)
+        for (c = col; c < col + w; c++)
             vt->fplane[r * VGA_COLS + c] = slot;
 }

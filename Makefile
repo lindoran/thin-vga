@@ -22,7 +22,7 @@ LDFLAGS = -lX11 -lm
 
 .PHONY: all demo font clean distclean
 
-all: libvgaterm.a libfontio.a vgaterm_demo fontedit
+all: libvgaterm.a libfontio.a vgaterm_demo editor fontedit scaling_demo
 
 # ---- font header (auto-generated) ----------------------------------------
 
@@ -57,7 +57,7 @@ demo: vgaterm_demo
 # ---- cleanup --------------------------------------------------------------
 
 clean:
-	rm -f *.o libvgaterm.a libvio.a libfontio.a vgaterm_demo editor fontedit
+	rm -f *.o libvgaterm.a libvio.a libfontio.a vgaterm_demo demo_test editor fontedit scaling_demo
 
 distclean: clean
 	rm -f font_vga.h
@@ -92,4 +92,12 @@ editor.o: editor.c vio.h vgaterm.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 editor: editor.o libvio.a libvgaterm.a
+	$(CC) -o $@ $^ $(LDFLAGS)
+
+# ---- scaling demo ---------------------------------------------------------
+
+scaling_demo.o: scaling_demo.c vio.h vgaterm.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+scaling_demo: scaling_demo.o libvio.a libvgaterm.a
 	$(CC) -o $@ $^ $(LDFLAGS)

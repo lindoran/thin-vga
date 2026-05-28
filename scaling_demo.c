@@ -14,7 +14,6 @@
 int main(void)
 {
     VGATerm *vt;
-    uint8_t *mem;
     int scale_factor = 1;
     int frame = 0;
     int key;
@@ -25,8 +24,6 @@ int main(void)
 
     /* Initialize keyboard input */
     vio_init(vt);
-
-    mem = vgaterm_mem(vt);
 
     /* Clear screen and show initial message */
     vio_setattr(VGA_ATTR(VGA_BLACK, VGA_LGRAY));
