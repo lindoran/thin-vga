@@ -74,22 +74,30 @@ def load_vga_font(path):
 # ---------------------------------------------------------------------------
 def slant_glyph(glyph):
     """
-    Rotate each row right by (15-r)>>2 bits, preserving all pixels.
-    Row 0 (top)  -> rotate 3   (leans right)
-    Row 15 (bot) -> rotate 0   (anchor)
+    Slant algorithm using 16-bit workspace:
+    1. Expand 8-bit glyph to 16-bit with character in upper byte
+    2. Shift right by (15-r)>>2 bits for slant (bits move into lower byte, no wraparound)
+    3. Shift left by 1 to align back to left edge
+    4. Extract upper byte and return as 8-bit result
     
-    Uses circular bit rotation ("window" technique):
-    - Pixels that would fall off the right edge wrap to the left
-    - All pixel information is preserved
+    This avoids losing bits to wraparound since we have room in the lower byte.
     """
     result = []
     for r, byte in enumerate(glyph):
         shift = (15 - r) >> 2
-        # Circular rotate right: rightmost bits wrap to the left
-        # (byte >> shift) | ((byte & mask) << (8 - shift))
-        mask = (1 << shift) - 1  # Mask for rightmost 'shift' bits
-        rotated = ((byte >> shift) | ((byte & mask) << (8 - shift))) & 0xFF
-        result.append(rotated)
+        
+        # Expand to 16 bits: character in upper byte, zeros in lower
+        word = byte << 8
+        
+        # Shift right for slant (bits move right, no wraparound, they go to lower byte)
+        word = word >> shift
+        
+        # Shift left by 1 to align back to left edge
+        word = word << 1
+        
+        # Extract upper byte (the slanted character)
+        result.append((word >> 8) & 0xFF)
+    
     return result
 
 # ---------------------------------------------------------------------------

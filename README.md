@@ -171,10 +171,12 @@ make demo     # also runs the demo
 
 ## Font Regeneration
 
-`font_vga.h` is pre-generated and committed to the repo — you do not need to
-regenerate it under normal circumstances.
+`font_vga.h` and `font_italic.h` are pre-generated and committed to the repo — you do not need to
+regenerate them under normal circumstances.
 
-If you do need to regenerate it (e.g. after modifying `mkfont.py`):
+### Regenerating the Base VGA Font
+
+If you do need to regenerate `font_vga.h` (e.g. after modifying `mkfont.py`):
 
 ```bash
 sudo apt install python3-fonttools
@@ -189,6 +191,22 @@ earlier versions of this project.
 > **If box-drawing characters look wrong in your application, `font_vga.h` is
 > the first place to check.** Regenerate it from the OTB using the command
 > above and verify the output.
+
+### Generating the Italic Font
+
+The italic variant is algorithmically generated from `font_vga.h`:
+
+```bash
+python3 mkitalic.py > font_italic.h
+```
+
+The italic generation algorithm:
+1. Expands each 8-bit glyph to a 16-bit workspace
+2. Shifts each row right by `(15-row) >> 2` bits to create the slant (row 0 shifts 3, bottom rows anchor)
+3. Shifts left by 1 to realign the character to the left edge
+4. Extracts the upper byte to produce the slanted 8-bit result
+
+This preserves all pixel information during the slant by using the extra 16-bit space, avoiding wraparound artifacts. The result produces a properly squashed italic glyph that fits within the cell, only dropping minimal pixels from the right edge at the top of each character.
 
 ## Integration
 
@@ -450,3 +468,7 @@ SOFTWARE.
 [Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/)
 by VileR, and are licensed separately under
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+`font_italic.h` is algorithmically derived from `font_vga.h` and is therefore
+also derivative of the original font pack. It is licensed under the same
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) terms.
