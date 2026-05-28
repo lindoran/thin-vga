@@ -2,35 +2,37 @@
 """
 mkitalic.py  --  Generate font_italic.h for thin-vga
 
-Renders FreeMonoOblique (or DejaVuSansMono-Oblique) at the right point
-size to fill 8x16 cells for ASCII 0x20-0x7E.  CP437 special characters
-(0x00-0x1F and 0x7F-0xFF) are taken from font_vga.h and algorithmically
-slanted, since those glyphs have no TTF equivalent.
+Algorithmically slants every glyph in font_vga.h to produce an italic
+variant that matches the VGA font's weight and style exactly.
+
+Algorithm (N=2):
+    For row r (0=top, 15=bottom):
+        shift = (15 - r) >> 2      ->  0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3
+    Each row is shifted RIGHT by 'shift' bits (MSB = leftmost pixel).
+    The bottom stays fixed; the top leans right by 3 pixels — classic italic.
 
 Usage:
-    python3 mkitalic.py [font.ttf] > font_italic.h
-    python3 mkitalic.py --preview   (saves italic_preview.png, no header)
+    python3 mkitalic.py                        # reads deps/thin-vga/font_vga.h
+    python3 mkitalic.py path/to/font_vga.h     # explicit source path
+    python3 mkitalic.py --preview              # writes italic_preview.png (needs Pillow)
 
-Output:
-    C header in the same format as font_vga.h, array named
-    vga_font_italic_8x16[256][16].
+Output is printed to stdout; redirect to font_italic.h:
+    python3 mkitalic.py > deps/thin-vga/font_italic.h
 """
 
 import sys
 import os
-import struct
 
 # ---------------------------------------------------------------------------
-# CP437 -> Unicode map (same table mkfont.py uses, needed for comments)
+# CP437 -> Unicode map (for comments in the output header)
 # ---------------------------------------------------------------------------
 CP437_UNICODE = [
     0x0000,0x263A,0x263B,0x2665,0x2666,0x2663,0x2660,0x2022,
     0x25D8,0x25CB,0x25D9,0x2642,0x2640,0x266A,0x266B,0x263C,
     0x25BA,0x25C4,0x2195,0x203C,0x00B6,0x00A7,0x25AC,0x21A8,
     0x2191,0x2193,0x2192,0x2190,0x221F,0x2194,0x25B2,0x25BC,
-    # 0x20-0x7E: standard ASCII
     *range(0x0020, 0x007F),
-    0x2302,  # 0x7F house
+    0x2302,
     0x00C7,0x00FC,0x00E9,0x00E2,0x00E4,0x00E0,0x00E5,0x00E7,
     0x00EA,0x00EB,0x00E8,0x00EF,0x00EE,0x00EC,0x00C4,0x00C5,
     0x00C9,0x00E6,0x00C6,0x00F4,0x00F6,0x00F2,0x00FB,0x00F9,
@@ -50,10 +52,9 @@ CP437_UNICODE = [
 ]
 
 # ---------------------------------------------------------------------------
-# Parse font_vga.h to get the base glyphs for the special chars
+# Load font_vga.h
 # ---------------------------------------------------------------------------
 def load_vga_font(path):
-    """Return list of 256 glyphs, each a list of 16 ints."""
     glyphs = []
     with open(path) as f:
         for line in f:
@@ -68,82 +69,46 @@ def load_vga_font(path):
     return glyphs
 
 # ---------------------------------------------------------------------------
-# Algorithmic italic slant: shift row r right by (15-r)//4 bits
-# Used for CP437 special glyphs that have no TTF equivalent
+# Slant algorithm
 # ---------------------------------------------------------------------------
 def slant_glyph(glyph):
-    """Apply a rightward slant to an 8x16 bitmap glyph."""
+    """
+    Shift each row right by (15-r)>>2 bits.
+    Row 0 (top)  -> shift 3   (leans right)
+    Row 15 (bot) -> shift 0   (anchor)
+    MSB is leftmost pixel, so >> shifts pixels rightward.
+    """
     result = []
     for r, byte in enumerate(glyph):
-        shift = (15 - r) >> 2   # 0,1,2,3 from bottom to top
-        # shift right means lower pixel positions (MSB = leftmost)
-        slanted = (byte >> shift) & 0xFF
-        result.append(slanted)
+        shift = (15 - r) >> 2
+        result.append((byte >> shift) & 0xFF)
     return result
 
 # ---------------------------------------------------------------------------
-# Render TTF italic glyphs for ASCII 0x20-0x7E
-# ---------------------------------------------------------------------------
-def render_ttf_glyphs(font_path, cell_w=8, cell_h=16):
-    """
-    Render ASCII 0x20..0x7E from font_path into 8x16 bitmaps.
-    Returns a dict: codepoint -> list of 16 ints (MSB=leftmost pixel).
-    """
-    try:
-        from PIL import Image, ImageFont, ImageDraw
-    except ImportError:
-        print("# WARNING: Pillow not available, falling back to slant algorithm for all glyphs",
-              file=sys.stderr)
-        return {}
-
-    font = ImageFont.truetype(font_path, 13)
-    asc, desc = font.getmetrics()
-    # vertical offset to centre the glyph in the cell
-    y_off = max(0, (cell_h - asc - desc) // 2)
-
-    result = {}
-    for cp in range(0x20, 0x7F):
-        ch = chr(cp)
-        img = Image.new('L', (cell_w * 2, cell_h), 0)   # wider canvas for italic overhang
-        draw = ImageDraw.Draw(img)
-        draw.text((0, y_off), ch, font=font, fill=255)
-
-        rows = []
-        for r in range(cell_h):
-            byte = 0
-            for b in range(cell_w):
-                px = img.getpixel((b, r))
-                if px > 64:          # threshold
-                    byte |= (0x80 >> b)
-            rows.append(byte)
-        result[cp] = rows
-
-    return result
-
-# ---------------------------------------------------------------------------
-# Build the preview PNG
+# Preview (optional, requires Pillow)
 # ---------------------------------------------------------------------------
 def save_preview(glyphs, path='italic_preview.png'):
     try:
         from PIL import Image
     except ImportError:
-        print("Pillow not available, skipping preview.", file=sys.stderr)
+        print("Pillow not available — skipping preview.", file=sys.stderr)
         return
 
-    cols, rows = 32, 8
+    cols, rows_count = 32, 8
     scale = 3
-    img = Image.new('RGB', (cols * 8 * scale, rows * 16 * scale), (0x18, 0x18, 0x18))
+    img = Image.new('RGB', (cols * 8 * scale, rows_count * 16 * scale),
+                    (0x18, 0x18, 0x18))
     pixels = img.load()
 
     for idx in range(256):
         glyph = glyphs[idx]
-        col = idx % cols
-        row = idx // cols
-        bx = col * 8 * scale
-        by = row * 16 * scale
+        col   = idx % cols
+        row   = idx // cols
+        bx    = col * 8 * scale
+        by    = row * 16 * scale
         for r, byte in enumerate(glyph):
             for b in range(8):
-                lit = bool(byte & (0x80 >> b))
+                lit   = bool(byte & (0x80 >> b))
                 color = (0xFF, 0xFF, 0xFF) if lit else (0x18, 0x18, 0x18)
                 for sy in range(scale):
                     for sx in range(scale):
@@ -153,21 +118,22 @@ def save_preview(glyphs, path='italic_preview.png'):
     print(f"Preview saved to {path}", file=sys.stderr)
 
 # ---------------------------------------------------------------------------
-# Emit the C header
+# Emit C header
 # ---------------------------------------------------------------------------
-def emit_header(glyphs, font_path):
+def emit_header(glyphs):
     print("/* font_italic.h  --  VGA 8x16 italic font bitmap table")
     print(" *")
-    print(f" * Auto-generated by mkitalic.py")
-    print(f" * TTF source: {os.path.basename(font_path)}")
-    print(f" * ASCII 0x20-0x7E: rendered from TTF at pt 13")
-    print(f" * Other ranges:    slanted from font_vga.h (shift = (15-row)>>2)")
+    print(" * Auto-generated by mkitalic.py")
+    print(" * Source: font_vga.h with algorithmic italic slant")
     print(" *")
-    print(" * Each row is 8 pixels wide; MSB is the leftmost pixel.")
-    print(" * Index with:  vga_font_italic_8x16[cp437_byte][scanline_row]")
+    print(" * Algorithm: row r shifted right by (15-r)>>2 bits")
+    print(" *   rows  0- 3  ->  shift 3 px")
+    print(" *   rows  4- 7  ->  shift 2 px")
+    print(" *   rows  8-11  ->  shift 1 px")
+    print(" *   rows 12-15  ->  shift 0 px  (anchor)")
     print(" *")
     print(" * Regenerate:")
-    print(" *   python3 mkitalic.py > font_italic.h")
+    print(" *   python3 mkitalic.py > deps/thin-vga/font_italic.h")
     print(" */")
     print()
     print("#ifndef FONT_ITALIC_H")
@@ -192,63 +158,27 @@ def main():
     preview_mode = '--preview' in sys.argv
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
 
-    # Locate font
     candidates = [
         args[0] if args else None,
-        '/usr/share/fonts/truetype/freefont/FreeMonoOblique.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Oblique.ttf',
-        '/usr/share/fonts/truetype/liberation/LiberationMono-Italic.ttf',
-    ]
-    font_path = None
-    for c in candidates:
-        if c and os.path.exists(c):
-            font_path = c
-            break
-
-    if font_path is None:
-        print("# ERROR: no italic monospace TTF found; install freefont-ttf or dejavu-ttf",
-              file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Using font: {font_path}", file=sys.stderr)
-
-    # Locate font_vga.h for base glyphs
-    vga_paths = [
         'deps/thin-vga/font_vga.h',
         'font_vga.h',
         '../thin-vga/font_vga.h',
     ]
-    vga_path = None
-    for p in vga_paths:
-        if os.path.exists(p):
-            vga_path = p
-            break
-
+    vga_path = next((c for c in candidates if c and os.path.exists(c)), None)
     if vga_path is None:
-        print("# ERROR: font_vga.h not found; run from the macguffin root directory",
+        print("ERROR: font_vga.h not found; run from the macguffin root directory",
               file=sys.stderr)
         sys.exit(1)
 
-    print(f"Base font:  {vga_path}", file=sys.stderr)
-    base = load_vga_font(vga_path)
-
-    # Render TTF for ASCII printable range
-    ttf_glyphs = render_ttf_glyphs(font_path)
-
-    # Build full 256-glyph italic table
-    glyphs = []
-    for i in range(256):
-        if i in ttf_glyphs:
-            glyphs.append(ttf_glyphs[i])
-        else:
-            # CP437 special / non-ASCII: slant the VGA bitmap
-            glyphs.append(slant_glyph(base[i]))
+    print(f"Source: {vga_path}", file=sys.stderr)
+    base   = load_vga_font(vga_path)
+    glyphs = [slant_glyph(g) for g in base]
 
     if preview_mode:
-        save_preview(glyphs, 'italic_preview.png')
+        save_preview(glyphs)
         return
 
-    emit_header(glyphs, font_path)
+    emit_header(glyphs)
 
 if __name__ == '__main__':
     main()
