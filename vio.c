@@ -190,12 +190,14 @@ static int translate_key(XKeyEvent *ev)
 
     /* ---- special keys ---- */
     switch (sym) {
-    case XK_BackSpace:                 return KEY_BS;
+    case XK_BackSpace:
+        return (mod & ControlMask) ? KEY_CTRL_BS : KEY_BS;
     case XK_Tab:
         return (mod & ShiftMask) ? KEY_SHIFT_TAB : KEY_TAB;
     case XK_Return:  case XK_KP_Enter: return KEY_ENTER;
     case XK_Escape:                    return KEY_ESC;
-    case XK_Delete:  case XK_KP_Delete: return KEY_DEL;
+    case XK_Delete:  case XK_KP_Delete:
+        return (mod & ControlMask) ? KEY_CTRL_DEL : KEY_DEL;
     case XK_Insert:  case XK_KP_Insert: return KEY_INS;
 
     case XK_Up:    case XK_KP_Up:

@@ -93,6 +93,10 @@
 #define KEY_CTRL_HOME  0x012C
 #define KEY_CTRL_END   0x012D
 
+/* Ctrl + Backspace / Delete (word-kill keys) */
+#define KEY_CTRL_BS    0x012E
+#define KEY_CTRL_DEL   0x012F
+
 /* Sentinel values */
 #define KEY_CLOSED     -1               /* window was closed      */
 #define KEY_NONE       -2               /* vio_kbhit() returned nothing */
