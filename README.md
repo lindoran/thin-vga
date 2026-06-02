@@ -340,6 +340,10 @@ int vio_kbhit(void);                    /* return pending key or KEY_NONE */
 #define KEY_CTRL_HOME  0x012C
 #define KEY_CTRL_END   0x012D
 
+/* Ctrl + Backspace / Delete (word-kill) */
+#define KEY_CTRL_BS    0x012E
+#define KEY_CTRL_DEL   0x012F
+
 /* Alt+key (letters/digits only) */
 #define KEY_ALT(c)     (0x0200 | ((unsigned char)(c)))  /* Alt+a == 0x0261 */
 
