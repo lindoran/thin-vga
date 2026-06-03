@@ -11,9 +11,11 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/Xatom.h>
 #include <X11/keysym.h>
 
 #include <string.h>
+#include <stdlib.h>
 
 /* -----------------------------------------------------------------------
  * Module state (static singleton -- one terminal per process)
@@ -29,6 +31,26 @@ static int       s_row  = 0;
 static uint8_t   s_attr = VGA_ATTR_DEFAULT;
 
 static int       s_alive = 1;  /* 0 once window is closed */
+
+/* ----------------------------------------------------------------------- */
+/* Clipboard state                                                           */
+/* ----------------------------------------------------------------------- */
+#define CLIP_BUF_MAX  (1024 * 1024)   /* 1 MB paste cap */
+
+static Atom s_atom_clipboard  = None;
+static Atom s_atom_utf8       = None;
+static Atom s_atom_targets    = None;
+static Atom s_atom_xsel_data  = None;  /* property we ask data into */
+
+/* Data we are advertising as our CLIPBOARD content */
+static char *s_clip_owned     = NULL;  /* malloc'd copy, or NULL    */
+static int   s_clip_owned_len = 0;
+static int   s_clip_we_own    = 0;     /* 1 if we hold XA_CLIPBOARD */
+
+/* Data received from a paste request */
+static char  s_clip_in[CLIP_BUF_MAX + 1];
+static int   s_clip_in_len    = 0;
+static int   s_clip_in_ready  = 0;    /* 1 when data is available  */
 
 /* -----------------------------------------------------------------------
  * Lifecycle
@@ -58,11 +80,24 @@ void vio_init(VGATerm *vt)
     s_wmdel = XInternAtom(s_dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(s_dpy, s_win, &s_wmdel, 1);
 
+    /* Clipboard atoms */
+    s_atom_clipboard = XInternAtom(s_dpy, "CLIPBOARD",        False);
+    s_atom_utf8      = XInternAtom(s_dpy, "UTF8_STRING",      False);
+    s_atom_targets   = XInternAtom(s_dpy, "TARGETS",          False);
+    s_atom_xsel_data = XInternAtom(s_dpy, "VIO_XSEL_DATA",    False);
+
     XFlush(s_dpy);
 }
 
 void vio_fini(void)
 {
+    if (s_clip_owned) {
+        free(s_clip_owned);
+        s_clip_owned     = NULL;
+        s_clip_owned_len = 0;
+    }
+    s_clip_we_own   = 0;
+    s_clip_in_ready = 0;
     s_vt  = NULL;
     s_dpy = NULL;
     s_win = 0;
@@ -284,6 +319,94 @@ static int pump_one(XEvent *ev)
         s_alive = 0;
         return KEY_CLOSED;
 
+    /* --- X11 clipboard: we are being asked to hand over our data --- */
+    case SelectionRequest: {
+        XSelectionRequestEvent *req = &ev->xselectionrequest;
+        XSelectionEvent         reply;
+
+        memset(&reply, 0, sizeof(reply));
+        reply.type      = SelectionNotify;
+        reply.display   = req->display;
+        reply.requestor = req->requestor;
+        reply.selection = req->selection;
+        reply.target    = req->target;
+        reply.property  = None;   /* denied by default */
+        reply.time      = req->time;
+
+        if (s_clip_we_own && s_clip_owned && req->property != None) {
+            if (req->target == s_atom_targets) {
+                /* Advertise what we can convert to */
+                Atom supported[2];
+                supported[0] = s_atom_utf8;
+                supported[1] = XA_STRING;
+                XChangeProperty(req->display, req->requestor,
+                                req->property, XA_ATOM, 32,
+                                PropModeReplace,
+                                (unsigned char *)supported, 2);
+                reply.property = req->property;
+            } else if (req->target == s_atom_utf8 ||
+                       req->target == XA_STRING) {
+                /* Send as UTF-8 (or Latin-1 fallback for XA_STRING) */
+                XChangeProperty(req->display, req->requestor,
+                                req->property,
+                                req->target == s_atom_utf8
+                                    ? s_atom_utf8 : XA_STRING,
+                                8, PropModeReplace,
+                                (unsigned char *)s_clip_owned,
+                                s_clip_owned_len);
+                reply.property = req->property;
+            }
+        }
+        XSendEvent(req->display, req->requestor, False, 0,
+                   (XEvent *)&reply);
+        XFlush(req->display);
+        return KEY_NONE;
+    }
+
+    /* --- X11 clipboard: we lost ownership (another app copied) --- */
+    case SelectionClear:
+        if (ev->xselectionclear.selection == s_atom_clipboard) {
+            s_clip_we_own = 0;
+            /* keep s_clip_owned in case undelete still refs it;
+               it will be freed on next vio_clipboard_set or vio_fini */
+        }
+        return KEY_NONE;
+
+    /* --- X11 clipboard: paste data has arrived --- */
+    case SelectionNotify: {
+        XSelectionEvent *sev = &ev->xselection;
+        if (sev->property == None) {
+            /* Conversion failed — try XA_STRING fallback? Already done. */
+            s_clip_in_ready = 0;
+            return KEY_PASTE_READY;   /* signal editor to check anyway */
+        }
+        if (sev->selection == s_atom_clipboard &&
+            sev->property  == s_atom_xsel_data) {
+            Atom   actual_type;
+            int    actual_format;
+            unsigned long n_items, bytes_after;
+            unsigned char *prop_data = NULL;
+
+            XGetWindowProperty(s_dpy, s_win, s_atom_xsel_data,
+                               0, (CLIP_BUF_MAX / 4) + 1, True,
+                               AnyPropertyType,
+                               &actual_type, &actual_format,
+                               &n_items, &bytes_after,
+                               &prop_data);
+
+            if (prop_data && n_items > 0) {
+                int bytes = (int)n_items * (actual_format / 8);
+                if (bytes > CLIP_BUF_MAX) bytes = CLIP_BUF_MAX;
+                memcpy(s_clip_in, prop_data, (size_t)bytes);
+                s_clip_in[bytes] = '\0';
+                s_clip_in_len    = bytes;
+                s_clip_in_ready  = 1;
+            }
+            if (prop_data) XFree(prop_data);
+        }
+        return KEY_PASTE_READY;
+    }
+
     default:
         return KEY_NONE;
     }
@@ -380,6 +503,50 @@ void vio_set_title(const char *title)
 {
     if (s_dpy && s_win)
         XStoreName(s_dpy, s_win, title ? title : "");
+}
+
+/* -----------------------------------------------------------------------
+ * Clipboard public API
+ * ----------------------------------------------------------------------- */
+
+void vio_clipboard_set(const char *buf, int len)
+{
+    if (!s_dpy || !s_win) return;
+    if (len < 0) len = 0;
+    if (len > CLIP_BUF_MAX) len = CLIP_BUF_MAX;
+
+    free(s_clip_owned);
+    s_clip_owned = (char *)malloc((size_t)(len + 1));
+    if (!s_clip_owned) { s_clip_owned_len = 0; s_clip_we_own = 0; return; }
+    memcpy(s_clip_owned, buf, (size_t)len);
+    s_clip_owned[len] = '\0';
+    s_clip_owned_len  = len;
+
+    XSetSelectionOwner(s_dpy, s_atom_clipboard, s_win, CurrentTime);
+    s_clip_we_own = (XGetSelectionOwner(s_dpy, s_atom_clipboard) == s_win);
+    XFlush(s_dpy);
+}
+
+void vio_clipboard_request(void)
+{
+    if (!s_dpy || !s_win) return;
+    s_clip_in_ready = 0;
+    XConvertSelection(s_dpy, s_atom_clipboard, s_atom_utf8,
+                      s_atom_xsel_data, s_win, CurrentTime);
+    XFlush(s_dpy);
+}
+
+int vio_clipboard_owns(void)
+{
+    return s_clip_we_own;
+}
+
+const char *vio_clipboard_take(int *len)
+{
+    if (!s_clip_in_ready) { if (len) *len = 0; return NULL; }
+    s_clip_in_ready = 0;
+    if (len) *len = s_clip_in_len;
+    return s_clip_in;
 }
 
 /* -----------------------------------------------------------------------

@@ -100,6 +100,7 @@
 /* Sentinel values */
 #define KEY_CLOSED     -1               /* window was closed      */
 #define KEY_NONE       -2               /* vio_kbhit() returned nothing */
+#define KEY_PASTE_READY -3              /* SelectionNotify arrived; call vio_clipboard_take() */
 
 /* -----------------------------------------------------------------------
  * Lifecycle
@@ -269,6 +270,50 @@ void vio_set_title(const char *title);
  * ----------------------------------------------------------------------- */
 
 #define KEY_ALT(c)   (0x0200 | ((unsigned char)(c)))
+
+/* -----------------------------------------------------------------------
+ * X11 Clipboard (CLIPBOARD selection)
+ *
+ * Copy/paste goes through the standard X11 CLIPBOARD atom so it
+ * interoperates with other applications (terminals, browsers, etc.).
+ *
+ * COPY side:
+ *   Call vio_clipboard_set(buf, len) with the UTF-8 text to advertise.
+ *   vio owns the buffer for as long as it holds the selection; the caller
+ *   must not free it until vio_clipboard_owns() returns 0.
+ *
+ * PASTE side:
+ *   Call vio_clipboard_request() to ask the current owner to convert to
+ *   UTF-8.  The owner will send a SelectionNotify event which pump_one()
+ *   will handle, storing the result internally.  Retrieve it (and consume
+ *   it) with vio_clipboard_take().  Returns NULL if no data is ready yet.
+ *   The returned pointer is valid until the next call to clipboard_request
+ *   or clipboard_take.
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Advertise buf[0..len-1] as our CLIPBOARD content.
+ * Takes ownership of the X11 CLIPBOARD selection.
+ */
+void vio_clipboard_set(const char *buf, int len);
+
+/*
+ * Ask the current CLIPBOARD owner to send us UTF-8 text.
+ * The result arrives asynchronously; poll vio_clipboard_take().
+ */
+void vio_clipboard_request(void);
+
+/*
+ * Returns 1 if this process owns the CLIPBOARD selection.
+ */
+int vio_clipboard_owns(void);
+
+/*
+ * If a paste response has arrived, return a pointer to the NUL-terminated
+ * UTF-8 string and set *len to its byte length.  Returns NULL if nothing
+ * has arrived yet.  The data is consumed (cleared) on return.
+ */
+const char *vio_clipboard_take(int *len);
 
 /* -----------------------------------------------------------------------
  * Rectangular fill
