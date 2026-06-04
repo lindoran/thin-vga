@@ -98,9 +98,10 @@
 #define KEY_CTRL_DEL   0x012F
 
 /* Sentinel values */
-#define KEY_CLOSED     -1               /* window was closed      */
-#define KEY_NONE       -2               /* vio_kbhit() returned nothing */
-#define KEY_PASTE_READY -3              /* SelectionNotify arrived; call vio_clipboard_take() */
+#define KEY_CLOSED        -1              /* window was closed      */
+#define KEY_NONE          -2              /* vio_kbhit() returned nothing */
+#define KEY_PASTE_READY   -3             /* SelectionNotify arrived; call vio_clipboard_take() */
+#define KEY_SHIFT_RELEASE -4             /* Shift key released (not auto-repeat) */
 
 /* -----------------------------------------------------------------------
  * Lifecycle

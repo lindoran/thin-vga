@@ -75,6 +75,7 @@ void vio_init(VGATerm *vt)
     XSelectInput(s_dpy, s_win,
                  ExposureMask        |
                  KeyPressMask        |
+                 KeyReleaseMask      |
                  StructureNotifyMask);
 
     s_wmdel = XInternAtom(s_dpy, "WM_DELETE_WINDOW", False);
@@ -307,6 +308,29 @@ static int pump_one(XEvent *ev)
 
     case KeyPress:
         return translate_key(&ev->xkey);
+
+    case KeyRelease: {
+        /* Only care about Shift key releases.
+         * Filter auto-repeat: X11 generates KeyRelease+KeyPress pairs
+         * for held keys. If the next queued event is a KeyPress for
+         * the same key at the same time, it's auto-repeat — discard.  */
+        KeySym sym = XLookupKeysym(&ev->xkey, 0);
+        if (sym == XK_Shift_L || sym == XK_Shift_R) {
+            if (XPending(s_dpy)) {
+                XEvent next;
+                XPeekEvent(s_dpy, &next);
+                if (next.type == KeyPress &&
+                    next.xkey.keycode == ev->xkey.keycode &&
+                    next.xkey.time    == ev->xkey.time) {
+                    /* Auto-repeat pair — consume the press and ignore  */
+                    XNextEvent(s_dpy, &next);
+                    return KEY_NONE;
+                }
+            }
+            return KEY_SHIFT_RELEASE;
+        }
+        return KEY_NONE;
+    }
 
     case ClientMessage:
         if ((Atom)ev->xclient.data.l[0] == s_wmdel) {
