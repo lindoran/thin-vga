@@ -197,6 +197,24 @@ void vio_flush(void)
  * ----------------------------------------------------------------------- */
 
 /*
+ * VIO_FREE_CTRL_KEYS
+ *
+ * When defined at compile time, certain physical keys that X11 normally
+ * maps exclusively (Tab → KEY_TAB, Return → KEY_ENTER, Escape → KEY_ESC)
+ * will also honour their Ctrl+letter equivalents when ControlMask is set:
+ *
+ *   Ctrl+Tab (XK_Tab)    → KEY_CTRL('i')  = 0x09
+ *   Ctrl+Return          → KEY_CTRL('m')  = 0x0D
+ *   Ctrl+Escape          → KEY_CTRL('[')  = 0x1B
+ *
+ * Without this flag the special-key path intercepts these before
+ * XLookupString can return the control byte, so Ctrl+I always acts as
+ * Tab regardless of what the application binds to it.
+ *
+ * Define with: cc -DVIO_FREE_CTRL_KEYS ...
+ */
+
+/*
  * Translate an XKeyEvent into a vio KEY_* value.
  * Returns KEY_NONE if the event should be ignored (e.g. lone modifier press).
  */
@@ -228,10 +246,26 @@ static int translate_key(XKeyEvent *ev)
     switch (sym) {
     case XK_BackSpace:
         return (mod & ControlMask) ? KEY_CTRL_BS : KEY_BS;
+
     case XK_Tab:
+#ifdef VIO_FREE_CTRL_KEYS
+        /* Ctrl+Tab → KEY_CTRL('i') = 0x09 via XLookupString fallthrough */
+        if (mod & ControlMask) break;
+#endif
         return (mod & ShiftMask) ? KEY_SHIFT_TAB : KEY_TAB;
-    case XK_Return:  case XK_KP_Enter: return KEY_ENTER;
-    case XK_Escape:                    return KEY_ESC;
+
+    case XK_Return:  case XK_KP_Enter:
+#ifdef VIO_FREE_CTRL_KEYS
+        if (mod & ControlMask) break;   /* fall to XLookupString → 0x0D */
+#endif
+        return KEY_ENTER;
+
+    case XK_Escape:
+#ifdef VIO_FREE_CTRL_KEYS
+        if (mod & ControlMask) break;   /* fall to XLookupString → 0x1B */
+#endif
+        return KEY_ESC;
+
     case XK_Delete:  case XK_KP_Delete:
         return (mod & ControlMask) ? KEY_CTRL_DEL : KEY_DEL;
     case XK_Insert:  case XK_KP_Insert: return KEY_INS;

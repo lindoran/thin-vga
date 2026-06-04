@@ -46,7 +46,7 @@
 /* Common control-code aliases (their actual ASCII values) */
 #define KEY_CTRL(c)    ((c) & 0x1F)     /* KEY_CTRL('q') == 0x11 */
 #define KEY_BS         0x08             /* Backspace (^H)         */
-#define KEY_TAB        0x09             /* Tab       (^I)         */
+#define KEY_TAB        0x0130           /* Tab — extended so Ctrl+I (0x09) is free */
 #define KEY_ENTER      0x0D             /* Enter     (^M)         */
 #define KEY_ESC        0x1B             /* Escape                 */
 
